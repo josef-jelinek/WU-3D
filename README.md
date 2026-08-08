@@ -27,11 +27,11 @@ requests.
   offered: `G`rey (smooth diffuse ramp), `P`attern (original ZX Spectrum-style — luminance
   quantised to 9 discrete levels, each filled with a fixed 8×8 halftone tile: sparse dots,
   alternating columns, checkerboard, etc.), and `B`ayer (65-level ordered dithering against
-  an 8×8 Bayer matrix in *logical* pixels). `P` is the faithful re-creation; `B` is the
-  modern smooth-looking alternative.
+  an 8×8 Bayer matrix). Both dither modes tile at 8 *device* pixels, so they become finer
+  in high-resolution mode. `P` is the faithful re-creation; `B` is the modern alternative.
 - Press `T` to flip between the authentic 256×192 screen and high-resolution rendering.
-- Banner commands are clickable, and the mouse places points in OPEN and drags the view in
-  DISPLAY.
+- Banner commands and menu items are clickable; hovering highlights the target with inverse
+  video. The mouse places points in OPEN and drags the view in DISPLAY.
 - Cassette SAVE / LOAD become named browser-storage slots, plus `.json` export/import and
   binary `.stl` export (the lofted solid, ready for a slicer or CAD tool); `K`eep saves a
   PNG instead of a `SCREEN$`; `P`rint opens the browser print dialogue.

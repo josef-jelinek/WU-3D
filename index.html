@@ -37,6 +37,7 @@
 <input id="file" type="file" accept=".json,application/json">
 <script>
 "use strict";
+const $ = id => document.getElementById(id);
 /* =======================================================================
    VU-3D  (Psion, 1982) -- web edition.
    A single-file, dependency-free re-imagining of the ZX Spectrum program.
@@ -115,7 +116,7 @@ const Raster = {
     x = x | 0; y = y | 0;
     if (x < 0 || y < 0 || x >= W || y >= H) return;
     const S = this.S, b = this.buf, w = this.w;
-    let o = (y * S) * w + x * S;
+    let o = y * S * w + x * S;
     for (let j = 0; j < S; j++, o += w) for (let i = 0; i < S; i++) b[o + i] = c;
   },
   rect(x, y, rw, rh, c) {
@@ -123,10 +124,7 @@ const Raster = {
     const x1 = Math.min(W, (x + rw) | 0), y1 = Math.min(H, (y + rh) | 0);
     const S = this.S, b = this.buf, w = this.w;
     for (let yy = y; yy < y1; yy++) {
-      for (let j = 0; j < S; j++) {
-        const o = (yy * S + j) * w;
-        b.fill(c, o + x * S, o + x1 * S);
-      }
+      for (let j = 0; j < S; j++) b.fill(c, (yy * S + j) * w + x * S, (yy * S + j) * w + x1 * S);
     }
   },
   line(x0, y0, x1, y1, c, dash) {
@@ -135,7 +133,7 @@ const Raster = {
     const dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
     let err = dx + dy, n = 0;
     for (;;) {
-      if (!dash || (n >> 1) % 2 === 0) this.px(x0, y0, c);
+      if (!dash || !(n & 2)) this.px(x0, y0, c);
       n++;
       if (x0 === x1 && y0 === y1) break;
       const e2 = 2 * err;
@@ -148,8 +146,7 @@ const Raster = {
     for (let r = 0; r < 8; r++) {
       const bits = g[r];
       for (let b = 0; b < 8; b++) {
-        const on = (bits >> (7 - b)) & 1;
-        if (on) this.px(x + b, y + r, ink);
+        if ((bits >> (7 - b)) & 1) this.px(x + b, y + r, ink);
         else if (paper !== undefined) this.px(x + b, y + r, paper);
       }
     }
@@ -163,7 +160,6 @@ const Raster = {
 
 /* ------------------------------------------------------------------ math */
 function mat4() { return new Float32Array(16); }
-function ident(m) { m.fill(0); m[0] = m[5] = m[10] = m[15] = 1; return m; }
 function mul(o, a, b) {
   const r = mat4();
   for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
@@ -178,17 +174,21 @@ function perspective(m, fovy, asp, n, f) {
   m[11] = -1; m[14] = 2 * f * n / (n - f); return m;
 }
 function lookAt(m, eye, ctr, up) {
-  const z = norm3([eye[0] - ctr[0], eye[1] - ctr[1], eye[2] - ctr[2]]);
+  const z = norm3(eye.map((v, i) => v - ctr[i]));
   const x = norm3(cross3(up, z)), y = cross3(z, x);
   m[0] = x[0]; m[1] = y[0]; m[2] = z[0]; m[3] = 0;
   m[4] = x[1]; m[5] = y[1]; m[6] = z[1]; m[7] = 0;
   m[8] = x[2]; m[9] = y[2]; m[10] = z[2]; m[11] = 0;
-  m[12] = -dot3(x, eye); m[13] = -dot3(y, eye); m[14] = -dot3(z, eye); m[15] = 1;
+  [x, y, z].forEach((v, i) => m[12 + i] = -dot3(v, eye));
+  m[15] = 1;
   return m;
 }
 function cross3(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
 function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
-function norm3(a) { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
+function norm3(a) {
+  const l = Math.hypot(...a) || 1;
+  return a.map(v => v / l);
+}
 
 /* --------------------------------------------------------- 2D geometry   */
 function cross2(o, a, b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
@@ -202,22 +202,14 @@ function segCross(a, b, c, d) {
   const d3 = cross2(a, b, c), d4 = cross2(a, b, d);
   if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
       ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
-  if (d1 === 0 && onSeg(c, d, a)) return true;
-  if (d2 === 0 && onSeg(c, d, b)) return true;
-  if (d3 === 0 && onSeg(a, b, c)) return true;
-  if (d4 === 0 && onSeg(a, b, d)) return true;
-  return false;
+  return (d1 === 0 && onSeg(c, d, a)) || (d2 === 0 && onSeg(c, d, b)) ||
+         (d3 === 0 && onSeg(a, b, c)) || (d4 === 0 && onSeg(a, b, d));
 }
 function ringSegs(pts, closed) {
   const s = [], n = pts.length;
   for (let i = 0; i + 1 < n; i++) s.push([pts[i], pts[i + 1]]);
   if (closed && n > 2) s.push([pts[n - 1], pts[0]]);
   return s;
-}
-function ringsCross(A, B) {
-  const sa = ringSegs(A, true), sb = ringSegs(B, true);
-  for (const p of sa) for (const q of sb) if (segCross(p[0], p[1], q[0], q[1])) return true;
-  return false;
 }
 function selfCross(pts, closed) {
   const s = ringSegs(pts, closed);
@@ -229,15 +221,13 @@ function selfCross(pts, closed) {
   return false;
 }
 function centroid(pts) {
-  let x = 0, y = 0; for (const p of pts) { x += p[0]; y += p[1]; }
-  return [x / pts.length, y / pts.length];
+  return pts.reduce((a, p) => [a[0] + p[0], a[1] + p[1]], [0, 0]).map(v => v / pts.length);
 }
 function signedArea(pts) {
-  let a = 0; for (let i = 0; i < pts.length; i++) {
-    const p = pts[i], q = pts[(i + 1) % pts.length];
-    a += p[0] * q[1] - q[0] * p[1];
-  }
-  return a / 2;
+  return pts.reduce((a, p, i) => {
+    const q = pts[(i + 1) % pts.length];
+    return a + p[0] * q[1] - q[0] * p[1];
+  }, 0) / 2;
 }
 function pointInTri(p, a, b, c) {
   const d1 = cross2(a, b, p), d2 = cross2(b, c, p), d3 = cross2(c, a, p);
@@ -248,7 +238,7 @@ function pointInTri(p, a, b, c) {
 function triangulate(pts) {
   const n = pts.length;
   if (n < 3) return [];
-  let idx = []; for (let i = 0; i < n; i++) idx.push(i);
+  let idx = [...Array(n).keys()];
   if (signedArea(pts) < 0) idx.reverse();
   const tris = [];
   let guard = 0;
@@ -257,12 +247,7 @@ function triangulate(pts) {
     for (let i = 0; i < idx.length; i++) {
       const a = idx[(i + idx.length - 1) % idx.length], b = idx[i], c = idx[(i + 1) % idx.length];
       if (cross2(pts[a], pts[b], pts[c]) <= 0) continue;
-      let ok = true;
-      for (const j of idx) {
-        if (j === a || j === b || j === c) continue;
-        if (pointInTri(pts[j], pts[a], pts[b], pts[c])) { ok = false; break; }
-      }
-      if (!ok) continue;
+      if (!idx.every(j => j === a || j === b || j === c || !pointInTri(pts[j], pts[a], pts[b], pts[c]))) continue;
       tris.push([a, b, c]); idx.splice(i, 1); clipped = true; break;
     }
     if (!clipped) { for (let i = 1; i < idx.length - 1; i++) tris.push([idx[0], idx[i], idx[i + 1]]); break; }
@@ -281,12 +266,10 @@ const ZSTEP = 5;
 function newModel() {
   return { planes: [{ z: 0, fresh: true, rings: [] }], figs: {}, nextId: 1 };
 }
-function clonePts(p) { return p.map(q => [q[0], q[1]]); }
+function clonePts(p) { return p.map(q => q.slice()); }
 function curPlane(m, i) { return m.planes[i]; }
-function ringOf(plane, id) { return plane.rings.find(r => r.fig === id) || null; }
 function figClosed(m, id, planeIdx) {
-  const f = m.figs[id];
-  return f && f.closedAt !== null && f.closedAt <= planeIdx;
+  return (m.figs[id]?.closedAt ?? Infinity) <= planeIdx;
 }
 
 /* --------------------------------------------------------- mesh building */
@@ -297,14 +280,14 @@ function buildMesh(m) {
   const P = (p, z) => [p[0] - MW / 2, z, -(p[1] - MH / 2)];
   function tri(a, b, c, n) {
     pos.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-    for (let i = 0; i < 3; i++) nrm.push(n[0], n[1], n[2]);
+    nrm.push(...n, ...n, ...n);
   }
   function seg(a, b) { lin.push(a[0], a[1], a[2], b[0], b[1], b[2]); }
 
   for (const id in m.figs) {
     const stack = [];
     for (const pl of m.planes) {
-      const r = ringOf(pl, +id);
+      const r = pl.rings.find(r => r.fig === +id);
       if (r && r.pts.length >= 3) stack.push({ z: pl.z, pts: r.pts });
     }
     if (!stack.length) continue;
@@ -320,18 +303,17 @@ function buildMesh(m) {
         const i2 = (i + 1) % n;
         const a = P(A.pts[i], A.z), b = P(A.pts[i2], A.z);
         const c = P(B.pts[i2], B.z), d = P(B.pts[i], B.z);
-        const nn = norm3(cross3([b[0] - a[0], b[1] - a[1], b[2] - a[2]],
-                                [d[0] - a[0], d[1] - a[1], d[2] - a[2]]));
+        const nn = norm3(cross3(a.map((v, i) => b[i] - v), a.map((v, i) => d[i] - v)));
         tri(a, b, c, nn); tri(a, c, d, nn);
         seg(a, d);
       }
     }
     /* caps */
     const f = m.figs[id] || {};
-    const capEnds = [];
-    if (f.capBottom !== false) capEnds.push([stack[0], [0, -1, 0]]);
-    if (stack.length > 1 && f.capTop !== false) capEnds.push([stack[stack.length - 1], [0, 1, 0]]);
-    else if (stack.length === 1 && f.capTop !== false) capEnds.push([stack[0], [0, 1, 0]]);
+    const capEnds = [
+      f.capBottom !== false && [stack[0], [0, -1, 0]],
+      f.capTop    !== false && [stack[stack.length - 1], [0, 1, 0]]
+    ].filter(Boolean);
     for (const [s, nn] of capEnds) {
       for (const t of triangulate(s.pts))
         tri(P(s.pts[t[0]], s.z), P(s.pts[t[1]], s.z), P(s.pts[t[2]], s.z), nn);
@@ -345,7 +327,7 @@ function buildMesh(m) {
       lo[k] = Math.min(lo[k], scan[i + k]); hi[k] = Math.max(hi[k], scan[i + k]);
     }
   if (!scan.length) { lo = [-1, -1, -1]; hi = [1, 1, 1]; }
-  const ctr = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+  const ctr = lo.map((v, i) => (v + hi[i]) / 2);
   const rad = Math.max(1, Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2);
   return {
     pos: new Float32Array(pos), nrm: new Float32Array(nrm),
@@ -393,22 +375,29 @@ void main(){
   if(!gl_FrontFacing) N = -N;
   float d = max(dot(N, normalize(uLight)), 0.0);
   float lum = clamp(0.18 + 0.82*d, 0.0, 1.0);
+  /* which of the two colours is perceptually darker/brighter — works for any
+     ink/paper combination the user may have chosen                          */
+  float lumI = dot(uInk,   vec3(0.299, 0.587, 0.114));
+  float lumP = dot(uPaper, vec3(0.299, 0.587, 0.114));
+  vec3 dark   = lumI < lumP ? uInk   : uPaper;
+  vec3 bright = lumI < lumP ? uPaper : uInk;
   if(uMode == 0){
-    outColor = vec4(mix(uInk, uPaper, lum), 1.0);
+    outColor = vec4(mix(dark, bright, lum), 1.0);
   } else if(uMode == 1){
     vec2 p = floor(gl_FragCoord.xy / uPix);
     int i = int(mod(p.x, 8.0)) + 8 * int(mod(p.y, 8.0));
     float t = (bayer[i] + 0.5) / 64.0;
-    outColor = vec4(lum > t ? uPaper : uInk, 1.0);
+    outColor = vec4(lum > t ? bright : dark, 1.0);
   } else {
-    /* quantise to one of 9 discrete levels then tile the matching pattern */
-    int level = clamp(int(lum * 8.0 + 0.5), 0, 8);
+    /* level 0 = all dark, level 8 = all bright; invert lum so darker faces
+       get more dark pixels, lighter faces get more bright pixels            */
+    int level = 8 - clamp(int(lum * 8.0 + 0.5), 0, 8);
     vec2 p = floor(gl_FragCoord.xy / uPix);
     int px = int(mod(p.x, 8.0));
     int py = int(mod(p.y, 8.0));
     int row = PAT[level * 8 + py];
-    bool isInk = ((row >> (7 - px)) & 1) == 1;
-    outColor = vec4(isInk ? uInk : uPaper, 1.0);
+    bool isDark = ((row >> (7 - px)) & 1) == 1;
+    outColor = vec4(isDark ? dark : bright, 1.0);
   }
 }`;
 
@@ -430,17 +419,19 @@ const GL = {
     this.gl = gl; this.ok = true;
     this.pSolid = this.prog(VS_SOLID, FS_SOLID);
     this.pLine = this.prog(VS_LINE, FS_LINE);
-    this.bPos = gl.createBuffer(); this.bNrm = gl.createBuffer(); this.bLin = gl.createBuffer();
-    this.vaoSolid = gl.createVertexArray();
-    gl.bindVertexArray(this.vaoSolid);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.bPos);
-    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.bNrm);
-    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
-    this.vaoLine = gl.createVertexArray();
-    gl.bindVertexArray(this.vaoLine);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.bLin);
-    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    [this.bPos, this.bNrm, this.bLin] = Array.from({length: 3}, () => gl.createBuffer());
+    const mkVao = (...bufs) => {
+      const vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      bufs.forEach((buf, i) => {
+        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        gl.enableVertexAttribArray(i);
+        gl.vertexAttribPointer(i, 3, gl.FLOAT, false, 0, 0);
+      });
+      return vao;
+    };
+    this.vaoSolid = mkVao(this.bPos, this.bNrm);
+    this.vaoLine  = mkVao(this.bLin);
     gl.bindVertexArray(null);
     return true;
   },
@@ -461,9 +452,10 @@ const GL = {
   },
   upload(mesh) {
     const gl = this.gl; this.mesh = mesh;
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.bPos); gl.bufferData(gl.ARRAY_BUFFER, mesh.pos, gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.bNrm); gl.bufferData(gl.ARRAY_BUFFER, mesh.nrm, gl.STATIC_DRAW);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.bLin); gl.bufferData(gl.ARRAY_BUFFER, mesh.lin, gl.STATIC_DRAW);
+    [[this.bPos, mesh.pos], [this.bNrm, mesh.nrm], [this.bLin, mesh.lin]].forEach(([b, d]) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, b);
+      gl.bufferData(gl.ARRAY_BUFFER, d, gl.STATIC_DRAW);
+    });
   },
   resize(S) {
     const cv = this.gl.canvas;
@@ -494,19 +486,25 @@ const app = {
   meshDirty: true,
   dirty: true,
   hits: [],
+  mouse: [-1, -1],     /* last known logical mouse position */
+  hoverKey: '',        /* serialised identity of the hit currently under the mouse */
   sound: true,
   fileName: 'untitled'
 };
 
-function paperC() { return col(app.colours.paper, app.colours.paperB); }
-function inkC() { return col(app.colours.ink, app.colours.inkB); }
-function bPaperC() { return col(app.colours.bpaper, app.colours.bpaperB); }
-function bInkC() { return col(app.colours.bink, app.colours.binkB); }
-function paperV() { return specRGB(app.colours.paper, app.colours.paperB).map(v => v / 255); }
-function inkV() { return specRGB(app.colours.ink, app.colours.inkB).map(v => v / 255); }
+const paperC  = () => col(app.colours.paper,  app.colours.paperB);
+const inkC    = () => col(app.colours.ink,    app.colours.inkB);
+const bPaperC = () => col(app.colours.bpaper, app.colours.bpaperB);
+const bInkC   = () => col(app.colours.bink,   app.colours.binkB);
+const paperV  = () => specRGB(app.colours.paper, app.colours.paperB).map(v => v / 255);
+const inkV    = () => specRGB(app.colours.ink,   app.colours.inkB).map(v => v / 255);
 
 function mark() { app.dirty = true; }
 function say(s, ms) { app.message = s; app.msgUntil = performance.now() + (ms || 2500); mark(); }
+function setPrompt(p) {
+  app.prompt = p;
+  mark();
+}
 
 /* ------------------------------------------------------------------ beep */
 let AC = null;
@@ -525,15 +523,11 @@ const bipNo = () => beep(120, 0.12, 'sawtooth');
 
 /* ================================================================ layout */
 function fit() {
-  const winW = window.innerWidth, winH = window.innerHeight - 46;
-  const Z = Math.max(1, Math.floor(Math.min(winW / W, winH / H)));
-  app.Z = Z;
-  const dpr = window.devicePixelRatio || 1;
-  const S = app.screenMode === 'authentic' ? 1 : Math.min(6, Math.max(1, Math.round(Z * dpr)));
-  app.S = S;
+  const Z = app.Z = Math.max(1, Math.floor(Math.min(window.innerWidth / W, (window.innerHeight - 46) / H)));
+  const S = app.S = app.screenMode === 'authentic' ? 1 : Math.min(6, Math.max(1, Math.round(Z * (window.devicePixelRatio || 1))));
   Raster.resize(S);
   if (GL.ok) GL.resize(S);
-  const scr = document.getElementById('scr');
+  const scr = $('scr');
   scr.style.width = (W * Z) + 'px';
   scr.style.height = (H * Z) + 'px';
   document.body.style.background = 'rgb(' + specRGB(app.colours.border, 0).join(',') + ')';
@@ -568,15 +562,15 @@ function bannerFor() {
   }
 }
 function drawBanner() {
-  const b = bannerFor();
-  Raster.rect(0, 0, W, 24, bPaperC());
+  const b = bannerFor(), bp = bPaperC(), bi = bInkC();
+  Raster.rect(0, 0, W, 24, bp);
   if (!b) return;
-  Raster.text(0, 0, b.title, bPaperC(), bInkC());     /* inverse video title */
+  Raster.text(0, 0, b.title, bp, bi);                 /* inverse video title */
   for (const [r, c, label, key] of b.items) {
-    Raster.text(c, r, label, bInkC(), bPaperC());
+    Raster.text(c, r, label, bi, bp);
     app.hits.push({ x0: c * 8, y0: r * 8, x1: (c + label.length) * 8, y1: r * 8 + 8, key });
   }
-  Raster.text(0, 2, b.hint, bInkC(), bPaperC());
+  Raster.text(0, 2, b.hint, bi, bp);
 }
 function drawStatus(left, right) {
   Raster.rect(0, VIEW_BOT, W, 8, paperC());
@@ -612,9 +606,8 @@ function drawRing(pts, closed, dotted) {
     Raster.line(sx(pts[pts.length - 1][0]), sy(pts[pts.length - 1][1]), sx(pts[0][0]), sy(pts[0][1]), c, dotted);
 }
 function drawCursor() {
+  if ((performance.now() % 600) >= 400) return;
   const c = inkC(), x = sx(app.cursor[0]), y = sy(app.cursor[1]);
-  const on = (performance.now() % 600) < 400;
-  if (!on) return;
   Raster.line(x - 3, y, x + 3, y, c);
   Raster.line(x, y - 3, x, y + 3, c);
 }
@@ -631,7 +624,7 @@ function ensureMesh() {
   const mesh = buildMesh(app.model);
   if (GL.ok) GL.upload(mesh);
   app.meshDirty = false;
-  if (!app.cam.dist) app.cam.dist = mesh.rad * 3.2;
+  app.cam.dist ||= mesh.rad * 3.2;
 }
 function draw3D(kind) {
   if (!GL.ok) { Raster.rect(0, VIEW_TOP, W, VIEW_H, paperC());
@@ -649,21 +642,16 @@ function draw3D(kind) {
 
   const c = app.cam, ctr = mesh.ctr;
   const dir = [Math.cos(c.lat) * Math.sin(c.lon), Math.sin(c.lat), Math.cos(c.lat) * Math.cos(c.lon)];
-  const eye = [ctr[0] + dir[0] * c.dist, ctr[1] + dir[1] * c.dist, ctr[2] + dir[2] * c.dist];
+  const eye = ctr.map((v, i) => v + dir[i] * c.dist);
   const proj = perspective(mat4(), 50 * Math.PI / 180, vw / vh, Math.max(0.5, mesh.rad * 0.01), c.dist + mesh.rad * 8);
   proj[0] *= c.scale; proj[5] *= c.scale;
   const view = lookAt(mat4(), eye, ctr, [0, 1, 0]);
   const mvp = mul(mat4(), proj, view);
 
   /* viewer-relative light, as in the original's above/centre/below x l/c/r */
-  const fwd = norm3(dir);
-  const right = norm3(cross3([0, 1, 0], fwd));
-  const up = cross3(fwd, right);
-  const L = norm3([
-    fwd[0] * 0.9 + right[0] * app.pic.light[0] + up[0] * app.pic.light[1],
-    fwd[1] * 0.9 + right[1] * app.pic.light[0] + up[1] * app.pic.light[1],
-    fwd[2] * 0.9 + right[2] * app.pic.light[0] + up[2] * app.pic.light[1]
-  ]);
+  const fwd = norm3(dir), right = norm3(cross3([0, 1, 0], fwd)), up = cross3(fwd, right);
+  const [lh, lv] = app.pic.light;
+  const L = norm3(fwd.map((f, i) => f * 0.9 + right[i] * lh + up[i] * lv));
 
   const drawSolid = (mode, colPaper, colInk) => {
     if (!mesh.ntri) return;
@@ -695,21 +683,12 @@ function draw3D(kind) {
     drawSolid(0, paperV(), paperV());
     gl.disable(gl.POLYGON_OFFSET_FILL);
     drawLines(inkV());
-  } else if (kind === 'gray') {
-    drawSolid(0, paperV(), inkV());
-  } else if (kind === 'pattern') {
-    drawSolid(2, paperV(), inkV());
   } else {
-    drawSolid(1, paperV(), inkV());   /* 'dither' = Bayer */
+    drawSolid({ gray: 0, pattern: 2, dither: 1 }[kind] ?? 1, paperV(), inkV());
   }
   gl.bindVertexArray(null);
   gl.disable(gl.SCISSOR_TEST);
 }
-function clearViewHole() {
-  /* leave the 3D region transparent so the GL canvas below shows through */
-  Raster.rect(0, VIEW_TOP, W, VIEW_H, 0);
-}
-
 /* ================================================================ screens */
 function drawMenu() {
   Raster.clear(paperC());
@@ -730,8 +709,7 @@ function drawMenu() {
     Raster.text(4, row, k + '  ' + label, inkC(), paperC());
     app.hits.push({ x0: 4 * 8, y0: row * 8, x1: W, y1: row * 8 + 8, key: k });
   });
-  const empty = !hasData();
-  Raster.text(2, 20, empty ? 'no data file in memory' : ('data file: ' + app.fileName), inkC(), paperC());
+  Raster.text(2, 20, hasData() ? 'data file: ' + app.fileName : 'no data file in memory', inkC(), paperC());
   drawStatus('press 1-7', 'h=help');
 }
 function hasData() {
@@ -749,8 +727,7 @@ function drawTitle() {
   Raster.text(6, 11, '© Psion 1982', inkC(), paperC());
   Raster.text(3, 14, '1  CREATE A NEW FIGURE', inkC(), paperC());
   Raster.text(3, 16, '2  LOAD A DATA FILE', inkC(), paperC());
-  app.hits.push({ x0: 0, y0: 14 * 8, x1: W, y1: 15 * 8, key: '1' });
-  app.hits.push({ x0: 0, y0: 16 * 8, x1: W, y1: 17 * 8, key: '2' });
+  [14, 16].forEach((row, i) => app.hits.push({ x0: 0, y0: row * 8, x1: W, y1: (row + 1) * 8, key: String(i + 1) }));
   Raster.text(2, 19, 'or any other key for the', inkC(), paperC());
   Raster.text(2, 20, 'main menu', inkC(), paperC());
   drawStatus('web edition', 'h=help');
@@ -805,8 +782,7 @@ function drawFiles(kind) {
     Raster.text(1, row, (i + 1) + ' ' + f.slice(0, 26), inkC(), paperC());
     app.hits.push({ x0: 8, y0: row * 8, x1: W, y1: row * 8 + 8, key: 'file' + i });
   });
-  if (kind === 'save') Raster.text(1, 19, 'press S to store under a new name', inkC(), paperC());
-  else Raster.text(1, 19, 'press a number to load', inkC(), paperC());
+  Raster.text(1, 19, kind === 'save' ? 'press S to store under a new name' : 'press a number to load', inkC(), paperC());
   Raster.text(1, 21, 'X for the built-in example', inkC(), paperC());
   app.hits.push({ x0: 8, y0: 21 * 8, x1: W, y1: 22 * 8, key: 'x' });
   drawStatus(kind === 'save' ? 'S=new name  1-9=overwrite' : '1-9 select', 'Q=quit');
@@ -819,17 +795,18 @@ function drawColour() {
   Raster.text(0, 0, 'COLOUR', bp, bi);
   Raster.text(8, 0, 'press 0-7', bi, bp);
   Raster.text(0, 2, app.colourStep.label, bi, bp);
+  const ic = inkC(), pc = paperC();
   for (let i = 0; i < 8; i++) {
     const y = 6 + i * 2;
-    Raster.text(2, y, i + ' ' + SPECTRUM_NAMES[i], inkC(), paperC());
+    Raster.text(2, y, i + ' ' + SPECTRUM_NAMES[i], ic, pc);
     for (const [x, br] of [[14 * 8, 0], [19 * 8, 1]]) {
-      Raster.rect(x - 1, y * 8 - 1, 34, 10, inkC());
+      Raster.rect(x - 1, y * 8 - 1, 34, 10, ic);
       Raster.rect(x, y * 8, 32, 8, col(i, br));
     }
     app.hits.push({ x0: 0, y0: y * 8, x1: W, y1: y * 8 + 8, key: '' + i });
   }
-  Raster.text(14, 4, 'norm brgt', inkC(), paperC());
-  Raster.text(1, 22, 'B toggles bright · Q quits', inkC(), paperC());
+  Raster.text(14, 4, 'norm brgt', ic, pc);
+  Raster.text(1, 22, 'B toggles bright · Q quits', ic, pc);
   drawStatus(app.colourStep.label, 'Q=quit');
 }
 
@@ -843,8 +820,7 @@ function drawPrompt() {
     if (app.prompt.text2) Raster.text(0, 2, app.prompt.text2.slice(0, 32), bi, bp);
   } else {
     Raster.text(0, 0, app.input.label.slice(0, 32), bi, bp);
-    const on = (performance.now() % 600) < 400;
-    Raster.text(0, 1, (app.input.value + (on ? '█' : ' ')).slice(-32), bi, bp);
+    Raster.text(0, 1, (app.input.value + ((performance.now() % 600) < 400 ? '█' : ' ')).slice(-32), bi, bp);
     Raster.text(0, 2, 'ENTER accepts · ESC cancels', bi, bp);
   }
 }
@@ -882,7 +858,7 @@ function paint() {
       Raster.clear(paperC());
       drawBanner();
       draw3D(app.mode === 'display' ? 'wire' : app.pic.type);
-      clearViewHole();
+      Raster.rect(0, VIEW_TOP, W, VIEW_H, 0); /* leave 3D region transparent */
       const c = app.cam;
       const t = app.mode === 'display' ? 'wire line'
         : ({ wire: 'wire line', hidden: 'hidden line', gray: 'shade: grey', pattern: 'shade: pattern', dither: 'shade: Bayer' })[app.pic.type];
@@ -891,30 +867,41 @@ function paint() {
     }
   }
   drawPrompt();
+  /* prompt/input overlays the banner — any hits registered before it are now
+     invisible, so discard them to prevent spurious hover highlights          */
+  if (app.prompt || app.input) app.hits = [];
   if (app.message && performance.now() < app.msgUntil) {
     Raster.rect(0, VIEW_BOT, W, 8, inkC());
     Raster.text(0, 23, app.message.slice(0, 32), paperC(), inkC());
+  }
+  /* invert pixels of the hovered hit target so it reads as a button highlight */
+  const [mx, my] = app.mouse;
+  const hh = app.hits.find(h => mx >= h.x0 && mx < h.x1 && my >= h.y0 && my < h.y1);
+  if (hh) {
+    const S = Raster.S, w = Raster.w, b = Raster.buf;
+    const x0 = hh.x0 * S, y0 = hh.y0 * S;
+    const x1 = Math.min(hh.x1 * S, w), y1 = Math.min(hh.y1 * S, Raster.h);
+    for (let y = y0; y < y1; y++) {
+      const o = y * w;
+      for (let x = x0; x < x1; x++) b[o + x] ^= 0x00FFFFFF;
+    }
   }
   Raster.flush();
 }
 
 /* ============================================================ create ops */
 function newFigure(pts) {
-  const m = app.model, id = m.nextId++;
+  const m = app.model, id = m.nextId++, pl = curPlane(m, app.planeIdx);
   m.figs[id] = { id, capBottom: true, capTop: true, closedAt: null };
-  curPlane(m, app.planeIdx).rings.push({ fig: id, pts });
-  app.selIdx = curPlane(m, app.planeIdx).rings.length - 1;
-  curPlane(m, app.planeIdx).fresh = false;
+  pl.rings.push({ fig: id, pts });
+  app.selIdx = pl.rings.length - 1;
+  pl.fresh = false;
   app.meshDirty = true;
-}
-function otherRings(exceptIdx) {
-  const pl = curPlane(app.model, app.planeIdx);
-  return pl.rings.filter((_, i) => i !== exceptIdx).map(r => r.pts);
 }
 /* would this candidate ring cross itself or any other figure? */
 function ringLegal(pts, closed, exceptIdx) {
   if (selfCross(pts, closed)) return false;
-  for (const o of otherRings(exceptIdx)) {
+  for (const o of curPlane(app.model, app.planeIdx).rings.filter((_, i) => i !== exceptIdx).map(r => r.pts)) {
     const segs = ringSegs(pts, closed), os = ringSegs(o, true);
     for (const a of segs) for (const b of os) if (segCross(a[0], a[1], b[0], b[1])) return false;
   }
@@ -923,30 +910,25 @@ function ringLegal(pts, closed, exceptIdx) {
 function transformRing(idx, fn) {
   const pl = curPlane(app.model, app.planeIdx);
   const r = pl.rings[idx]; if (!r) return false;
-  const np = r.pts.map(fn).map(p => [
-    Math.max(0, Math.min(MW, Math.round(p[0]))),
-    Math.max(0, Math.min(MH, Math.round(p[1])))
-  ]);
+  const np = r.pts.map(p => fn(p).map((v, i) => Math.max(0, Math.min([MW, MH][i], Math.round(v)))));
   if (!ringLegal(np, true, idx)) return false;
   r.pts = np; pl.fresh = false; app.meshDirty = true; return true;
 }
 function magnify(k) {
-  const pl = curPlane(app.model, app.planeIdx);
-  const r = pl.rings[app.selIdx]; if (!r) { bipNo(); return; }
+  const r = curPlane(app.model, app.planeIdx).rings[app.selIdx];
+  if (!r) { bipNo(); return; }
   const c = centroid(r.pts);
   if (!transformRing(app.selIdx, p => [c[0] + (p[0] - c[0]) * k, c[1] + (p[1] - c[1]) * k])) { bipNo(); say('cannot: figures would meet'); }
   else { bipOK(); mark(); }
 }
 function shiftFig(dx, dy) {
-  const pl = curPlane(app.model, app.planeIdx);
-  if (!pl.rings[app.selIdx]) { bipNo(); return; }
+  if (!curPlane(app.model, app.planeIdx).rings[app.selIdx]) { bipNo(); return; }
   if (!transformRing(app.selIdx, p => [p[0] + dx, p[1] + dy])) { bipNo(); say('cannot: figures would meet'); }
   else mark();
 }
 function nextZ(step) {
   const m = app.model, pl = curPlane(m, app.planeIdx);
-  const isLast = app.planeIdx === m.planes.length - 1;
-  if (isLast && pl.fresh && app.planeIdx > 0) {
+  if (app.planeIdx === m.planes.length - 1 && pl.fresh && app.planeIdx > 0) {
     pl.z += step;                       /* keep pressing N to dial Z in */
   } else {
     const rings = pl.rings
@@ -960,23 +942,21 @@ function nextZ(step) {
   app.meshDirty = true; bipOK(); mark();
 }
 function closeFigure() {
-  const m = app.model, pl = curPlane(m, app.planeIdx);
-  const r = pl.rings[app.selIdx];
+  const m = app.model, r = curPlane(m, app.planeIdx).rings[app.selIdx];
   if (!r) { bipNo(); return; }
   if (figClosed(m, r.fig, app.planeIdx)) { say('figure already closed'); bipNo(); return; }
-  app.prompt = {
+  setPrompt({
     title: 'CLOSE', text: 'leave the top of the object open?',
     text2: 'Y = yes (open)   N = no (solid)',
     keys: { y: () => finishClose(r.fig, false), n: () => finishClose(r.fig, true) }
-  };
-  mark();
+  });
 }
 function finishClose(figId, capped) {
-  const m = app.model;
-  m.figs[figId].capTop = capped;
-  m.figs[figId].closedAt = app.planeIdx;
+  const f = app.model.figs[figId];
+  f.capTop = capped;
+  f.closedAt = app.planeIdx;
   app.prompt = null; app.meshDirty = true; bipOK();
-  say('figure closed'); mark();
+  say('figure closed');
 }
 function closeAllOpen() {
   const m = app.model, last = m.planes.length - 1;
@@ -1004,15 +984,16 @@ function saveFile(name) {
   if (writeStore(o)) { app.fileName = name; say('saved "' + name + '"'); bipOK(); }
 }
 function loadFile(name) {
-  const o = readStore();
-  if (!o[name]) { bipNo(); return; }
-  adoptModel(o[name], name);
+  const m = readStore()[name];
+  if (!m) { bipNo(); return; }
+  adoptModel(m, name);
 }
 function adoptModel(m, name) {
   app.model = m; app.fileName = name || 'untitled';
   app.planeIdx = 0; app.selIdx = 0; app.open = null;
   app.meshDirty = true; app.cam.dist = 0; app.cam.scale = 1;
-  say('loaded "' + app.fileName + '"'); bipOK(); mark();
+  say('loaded "' + app.fileName + '"');
+  bipOK();
 }
 
 /* The built-in EXAMPLE: the wine glass and cube from Psion's own EXAMPLE
@@ -1037,18 +1018,15 @@ const EXAMPLE_FIGS = [
 ];
 function exampleModel() {
   const m = newModel();
-  m.planes = [];
   const zs = [...new Set(EXAMPLE_FIGS.flatMap(f => f.rings.map(r => r[0])))].sort((a, b) => a - b);
-  zs.forEach(z => m.planes.push({ z, fresh: false, rings: [] }));
+  m.planes = zs.map(z => ({ z, fresh: false, rings: [] }));
   for (const f of EXAMPLE_FIGS) {
     const id = m.nextId++;
-    m.figs[id] = { id, capBottom: !!f.cap[0], capTop: !!f.cap[1], closedAt: null };
+    m.figs[id] = { id, capBottom: !!f.cap[0], capTop: !!f.cap[1], closedAt: zs.indexOf(f.rings[f.rings.length - 1][0]) };
     for (const r of f.rings) {
-      const pts = [];
-      for (let i = 1; i < r.length; i += 2) pts.push([r[i], r[i + 1]]);
+      const pts = Array.from({length: (r.length - 1) / 2}, (_, i) => [r[i * 2 + 1], r[i * 2 + 2]]);
       m.planes[zs.indexOf(r[0])].rings.push({ fig: id, pts });
     }
-    m.figs[id].closedAt = zs.indexOf(f.rings[f.rings.length - 1][0]);
   }
   return m;
 }
@@ -1064,24 +1042,16 @@ function exportSTL() {
   /* Binary STL: 80-byte header + 4-byte triangle count + 50 bytes per triangle */
   const buf = new ArrayBuffer(84 + mesh.ntri * 50);
   const v = new DataView(buf);
-  const hdr = 'VU-3D export'; /* header: up to 80 ASCII bytes */
-  for (let i = 0; i < 80; i++) v.setUint8(i, i < hdr.length ? hdr.charCodeAt(i) : 0);
+  for (let i = 0; i < 80; i++) v.setUint8(i, 'VU-3D export'.charCodeAt(i) || 0);
   v.setUint32(80, mesh.ntri, true);
-  const pos = mesh.pos, nrm = mesh.nrm;
+  const { pos, nrm } = mesh;
   let off = 84;
   for (let t = 0; t < mesh.ntri; t++) {
     const b = t * 9;
-    /* normal — all three vertices share the same flat-face normal */
-    v.setFloat32(off, nrm[b],     true); off += 4;
-    v.setFloat32(off, nrm[b + 1], true); off += 4;
-    v.setFloat32(off, nrm[b + 2], true); off += 4;
-    /* three vertices */
-    for (let i = 0; i < 3; i++) {
-      v.setFloat32(off, pos[b + i * 3],     true); off += 4;
-      v.setFloat32(off, pos[b + i * 3 + 1], true); off += 4;
-      v.setFloat32(off, pos[b + i * 3 + 2], true); off += 4;
-    }
-    v.setUint16(off, 0, true); off += 2; /* attribute byte count */
+    for (let j = 0; j < 3; j++, off += 4) v.setFloat32(off, nrm[b + j], true);
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++, off += 4) v.setFloat32(off, pos[b + i * 3 + j], true);
+    v.setUint16(off, 0, true);
+    off += 2;
   }
   dl(new Blob([buf], { type: 'model/stl' }), app.fileName.replace(/\W+/g, '_') + '.stl');
   say('exported STL (' + mesh.ntri + ' triangles)');
@@ -1093,9 +1063,8 @@ function dl(blob, name) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 function keepPNG() {
-  const c = document.createElement('canvas');
+  const c = document.createElement('canvas'), x = c.getContext('2d');
   c.width = Raster.w; c.height = Raster.h;
-  const x = c.getContext('2d');
   x.imageSmoothingEnabled = false;
   x.fillStyle = 'rgb(' + specRGB(app.colours.paper, app.colours.paperB).join(',') + ')';
   x.fillRect(0, 0, c.width, c.height);
@@ -1117,9 +1086,7 @@ function startColour(back) {
   app.colourBack = back; app.mode = 'colour'; mark();
 }
 function colourPick(n) {
-  const s = COLOUR_STEPS[app.colourIdx];
-  app.colours[s.key] = n;
-  app.colourIdx++;
+  app.colours[COLOUR_STEPS[app.colourIdx++].key] = n;
   if (app.colourIdx >= COLOUR_STEPS.length) { app.mode = app.colourBack; fit(); bipOK(); return; }
   app.colourStep = COLOUR_STEPS[app.colourIdx];
   fit(); bipOK(); mark();
@@ -1127,37 +1094,23 @@ function colourPick(n) {
 
 /* ================================================================ shading */
 function askShade() {
-  app.prompt = {
-    title: 'SHADE', text: 'light above, centre or below?',
-    text2: 'press  A   C   B',
-    keys: {
-      a: () => askShade2(1), c: () => askShade2(0), b: () => askShade2(-1)
-    }
-  };
-  mark();
+  setPrompt({ title: 'SHADE', text: 'light above, centre or below?', text2: 'press  A   C   B',
+    keys: { a: () => askShade2(1), c: () => askShade2(0), b: () => askShade2(-1) } });
 }
 function askShade2(v) {
-  app.prompt = {
-    title: 'SHADE', text: 'light left, centre or right?',
-    text2: 'press  L   C   R',
-    keys: {
-      l: () => askShade3(v, -1), c: () => askShade3(v, 0), r: () => askShade3(v, 1)
-    }
-  };
-  mark();
+  setPrompt({ title: 'SHADE', text: 'light left, centre or right?', text2: 'press  L   C   R',
+    keys: { l: () => askShade3(v, -1), c: () => askShade3(v, 0), r: () => askShade3(v, 1) } });
 }
 function askShade3(v, h) {
   app.pic.light = [h, v];
-  app.prompt = {
-    title: 'SHADE', text: 'grey, pattern or Bayer dither?',
-    text2: 'press  G   P   B',
-    keys: {
-      g: () => { app.pic.type = 'gray';    app.prompt = null; bipOK(); mark(); },
-      p: () => { app.pic.type = 'pattern'; app.prompt = null; bipOK(); mark(); },
-      b: () => { app.pic.type = 'dither';  app.prompt = null; bipOK(); mark(); }
-    }
+  const pick = t => () => {
+    app.pic.type = t;
+    app.prompt = null;
+    bipOK();
+    mark();
   };
-  mark();
+  setPrompt({ title: 'SHADE', text: 'grey, pattern or Bayer dither?', text2: 'press  G   P   B',
+    keys: { g: pick('gray'), p: pick('pattern'), b: pick('dither') } });
 }
 
 /* ================================================================== keys */
@@ -1184,13 +1137,8 @@ function keyDown(e) {
 }
 
 function arrowOf(k) {
-  switch (k) {
-    case 'ArrowLeft': case '5': return [-1, 0];
-    case 'ArrowDown': case '6': return [0, -1];
-    case 'ArrowUp': case '7': return [0, 1];
-    case 'ArrowRight': case '8': return [1, 0];
-  }
-  return null;
+  return { ArrowLeft: [-1,0], 5: [-1,0], ArrowDown: [0,-1], 6: [0,-1],
+           ArrowUp: [0,1], 7: [0,1], ArrowRight: [1,0], 8: [1,0] }[k] || null;
 }
 
 function handleKey(k, shift) {
@@ -1201,20 +1149,18 @@ function handleKey(k, shift) {
 
   switch (app.mode) {
     case 'title':
-      if (lk === '1') { app.mode = 'create'; app.planeIdx = 0; app.selIdx = 0; }
-      else if (lk === '2') app.mode = 'load';
-      else if (lk === 'h') app.mode = 'help';
-      else app.mode = 'menu';
+      app.mode = lk === '1' ? (app.planeIdx = app.selIdx = 0, 'create')
+               : lk === '2' ? 'load' : lk === 'h' ? 'help' : 'menu';
       bipOK(); mark(); return;
 
     case 'menu':
       if (lk === 'h') { app.mode = 'help'; mark(); return; }
       if (lk === '1') { if (!hasData()) { say('no data file'); bipNo(); return; } app.mode = 'modify'; app.planeIdx = 0; app.selIdx = 0; bipOK(); mark(); return; }
       if (lk === '2') {
-        app.prompt = { title: 'ABANDON', text: 'delete the data file in memory?', text2: 'Y = yes   N = no',
-          keys: { y: () => { app.model = newModel(); app.fileName = 'untitled'; app.planeIdx = 0; app.selIdx = 0; app.meshDirty = true; app.cam.dist = 0; app.prompt = null; say('abandoned'); mark(); },
-                  n: () => { app.prompt = null; mark(); } } };
-        mark(); return;
+        setPrompt({ title: 'ABANDON', text: 'delete the data file in memory?', text2: 'Y = yes   N = no',
+          keys: { y: () => { app.model = newModel(); app.fileName = 'untitled'; app.planeIdx = 0; app.selIdx = 0; app.meshDirty = true; app.cam.dist = 0; app.prompt = null; say('abandoned'); },
+                  n: () => { app.prompt = null; mark(); } } });
+        return;
       }
       if (lk === '3') { app.mode = 'load'; mark(); return; }
       if (lk === '4') {
@@ -1243,7 +1189,7 @@ function handleKey(k, shift) {
     case 'save':
       if (lk === 'q' || k === 'Escape') { app.mode = 'menu'; mark(); return; }
       if (lk === 's') {
-        app.input = { label: 'file name?', value: '', cb: n => { saveFile(n); app.mode = 'menu'; mark(); } };
+        app.input = { label: 'file name?', value: '', cb: n => { saveFile(n); app.mode = 'menu'; } };
         mark(); return;
       }
       if (k >= '1' && k <= '9') {
@@ -1257,7 +1203,10 @@ function handleKey(k, shift) {
       if (lk === 'q' || k === 'Escape') { app.mode = app.colourBack; mark(); return; }
       if (lk === 'b') {
         const s = COLOUR_STEPS[app.colourIdx].key + 'B';
-        if (s in app.colours) { app.colours[s] = app.colours[s] ? 0 : 1; fit(); bipOK(); }
+        if (s in app.colours) {
+          app.colours[s] ^= 1;
+          fit(); bipOK();
+        }
         return;
       }
       if (k >= '0' && k <= '7') { colourPick(+k); return; }
@@ -1271,18 +1220,20 @@ function handleKey(k, shift) {
         app.mode = 'open'; bipOK(); mark(); return;
       }
       if (lk === 'f') {
-        const pl = curPlane(app.model, app.planeIdx);
-        if (pl.rings.length < 2) { bipNo(); return; }
-        app.selIdx = (app.selIdx + 1) % pl.rings.length; bipOK(); mark(); return;
+        const rl = curPlane(app.model, app.planeIdx).rings;
+        if (rl.length < 2) { bipNo(); return; }
+        app.selIdx = (app.selIdx + 1) % rl.length;
+        bipOK(); mark(); return;
       }
       if (lk === 'm') { magnify(1.12); return; }
       if (lk === 'r') { magnify(1 / 1.12); return; }
       if (lk === 'n') { nextZ(shift ? 1 : ZSTEP); return; }
       if (lk === 'c') { closeFigure(); return; }
       if (lk === 'q') {
-        closeAllOpen(); app.mode = 'menu'; app.cam.dist = 0;
-        if (!app.fileName || app.fileName === 'untitled') app.fileName = 'untitled';
-        bipOK(); say('object complete'); mark(); return;
+        closeAllOpen();
+        app.mode = 'menu';
+        app.cam.dist = 0;
+        bipOK(); say('object complete'); return;
       }
       bipNo(); return;
     }
@@ -1291,8 +1242,8 @@ function handleKey(k, shift) {
       const a = arrowOf(k);
       if (a) {
         const d = shift ? 1 : 4;
-        app.cursor[0] = Math.max(0, Math.min(MW, app.cursor[0] + a[0] * d));
-        app.cursor[1] = Math.max(0, Math.min(MH, app.cursor[1] + a[1] * d));
+        app.cursor = [Math.max(0, Math.min(MW, app.cursor[0] + a[0] * d)),
+                      Math.max(0, Math.min(MH, app.cursor[1] + a[1] * d))];
         mark(); return;
       }
       if (lk === 's') {
@@ -1302,8 +1253,7 @@ function handleKey(k, shift) {
       if (lk === 'l') {
         if (!app.open.started) { say('press S to start'); bipNo(); return; }
         const pts = app.open.pts.concat([app.cursor.slice()]);
-        if (pts.length > 1 && pts[pts.length - 1][0] === pts[pts.length - 2][0]
-            && pts[pts.length - 1][1] === pts[pts.length - 2][1]) { bipNo(); return; }
+        if (pts.length > 1 && pts.at(-1).join() === pts.at(-2).join()) { bipNo(); return; }
         if (!ringLegal(pts, false, -1)) { bipNo(); say('lines may not cross'); return; }
         app.open.pts = pts; bipOK(); mark(); return;
       }
@@ -1329,13 +1279,15 @@ function handleKey(k, shift) {
       if (lk === 'm') { magnify(1.12); return; }
       if (lk === 'r') { magnify(1 / 1.12); return; }
       if (lk === 'f') {
-        const pl = curPlane(app.model, app.planeIdx);
-        if (pl.rings.length < 2) { bipNo(); return; }
-        app.selIdx = (app.selIdx + 1) % pl.rings.length; bipOK(); mark(); return;
+        const rl = curPlane(app.model, app.planeIdx).rings;
+        if (rl.length < 2) { bipNo(); return; }
+        app.selIdx = (app.selIdx + 1) % rl.length;
+        bipOK(); mark(); return;
       }
       if (lk === 'n') {
         app.planeIdx = (app.planeIdx + 1) % app.model.planes.length;
-        app.selIdx = 0; bipOK(); mark(); return;
+        app.selIdx = 0;
+        bipOK(); mark(); return;
       }
       if (lk === 'q') { app.mode = 'menu'; app.cam.dist = 0; bipOK(); mark(); return; }
       bipNo(); return;
@@ -1350,16 +1302,23 @@ function handleKey(k, shift) {
         c.lat = Math.max(-1.5, Math.min(1.5, c.lat + a[1] * 0.10 * fine));
         mark(); return;
       }
+      const sf = shift ? 1.02 : 1.14;
       if (lk === 'n') { c.dist = Math.max(GL.mesh ? GL.mesh.rad * 0.05 : 1, c.dist * (shift ? 0.98 : 0.88)); mark(); return; }
-      if (lk === 'f') { c.dist *= shift ? 1.02 : 1.14; mark(); return; }
-      if (lk === 'm') { c.scale *= shift ? 1.02 : 1.14; mark(); return; }
-      if (lk === 'r') { c.scale /= shift ? 1.02 : 1.14; mark(); return; }
+      if (lk === 'f' || lk === 'm' || lk === 'r') {
+        c[lk === 'f' ? 'dist' : 'scale'] *= lk === 'r' ? 1 / sf : sf;
+        mark(); return;
+      }
       if (app.mode === 'display') {
-        if (lk === 'p') { app.mode = 'picture'; bipOK(); mark(); return; }
-        if (lk === 'q') { app.mode = 'menu'; bipOK(); mark(); return; }
+        const next = { p: 'picture', q: 'menu' }[lk];
+        if (next) {
+          app.mode = next;
+          bipOK(); mark(); return;
+        }
       } else {
-        if (lk === 'h') { app.pic.type = 'hidden'; bipOK(); mark(); return; }
-        if (lk === 'w') { app.pic.type = 'wire'; bipOK(); mark(); return; }
+        if (lk === 'h' || lk === 'w') {
+          app.pic.type = {h: 'hidden', w: 'wire'}[lk];
+          bipOK(); mark(); return;
+        }
         if (lk === 's') { askShade(); return; }
         if (lk === 'c') { startColour('picture'); return; }
         if (lk === 'k') { keepPNG(); return; }
@@ -1373,7 +1332,7 @@ function handleKey(k, shift) {
 
 /* ================================================================ mouse  */
 function toLogical(ev) {
-  const r = document.getElementById('scr').getBoundingClientRect();
+  const r = $('scr').getBoundingClientRect();
   const cx = (ev.touches ? ev.touches[0].clientX : ev.clientX) - r.left;
   const cy = (ev.touches ? ev.touches[0].clientY : ev.clientY) - r.top;
   return [cx / r.width * W, cy / r.height * H];
@@ -1381,22 +1340,23 @@ function toLogical(ev) {
 function pointerDown(ev) {
   ev.preventDefault();
   const [x, y] = toLogical(ev);
-  for (const h of app.hits) {
-    if (x >= h.x0 && x < h.x1 && y >= h.y0 && y < h.y1) {
-      if (h.key.startsWith('file')) {
-        const f = listFiles()[+h.key.slice(4)];
-        if (f) { if (app.mode === 'save') saveFile(f); else loadFile(f); app.mode = 'menu'; mark(); }
-        return;
+  const h = app.hits.find(h => x >= h.x0 && x < h.x1 && y >= h.y0 && y < h.y1);
+  if (h) {
+    if (h.key.startsWith('file')) {
+      const f = listFiles()[+h.key.slice(4)];
+      if (f) {
+        if (app.mode === 'save') saveFile(f); else loadFile(f);
+        app.mode = 'menu'; mark();
       }
-      handleKey(h.key, ev.shiftKey); return;
-    }
+    } else handleKey(h.key, ev.shiftKey);
+    return;
   }
   if (app.mode === 'open' && y > VIEW_TOP && y < VIEW_BOT) {
     app.cursor = [
       Math.max(0, Math.min(MW, Math.round(ux(x)))),
       Math.max(0, Math.min(MH, Math.round(uy(y))))
     ];
-    if (!app.open.started) handleKey('s', false); else handleKey('l', false);
+    handleKey(app.open.started ? 'l' : 's', false);
     return;
   }
   if ((app.mode === 'display' || app.mode === 'picture') && y > VIEW_TOP && y < VIEW_BOT) {
@@ -1404,22 +1364,29 @@ function pointerDown(ev) {
   }
 }
 function pointerMove(ev) {
+  /* hover detection — always runs so cursor and highlight stay current */
+  const [mx, my] = toLogical(ev);
+  app.mouse = [mx, my];
+  const hh = app.hits.find(h => mx >= h.x0 && mx < h.x1 && my >= h.y0 && my < h.y1);
+  const hk = hh ? `${hh.key}/${hh.x0}/${hh.y0}` : '';
+  if (hk !== app.hoverKey) {
+    app.hoverKey = hk;
+    $('scr').style.cursor = hh ? 'pointer' : '';
+    mark();
+  }
   if (app.mode === 'open' && !ev.buttons) {
-    const [x, y] = toLogical(ev);
-    if (y > VIEW_TOP && y < VIEW_BOT) {
-      app.cursor = [
-        Math.max(0, Math.min(MW, Math.round(ux(x)))),
-        Math.max(0, Math.min(MH, Math.round(uy(y))))
-      ];
+    if (my > VIEW_TOP && my < VIEW_BOT) {
+      app.cursor = [Math.max(0, Math.min(MW, Math.round(ux(mx)))),
+                   Math.max(0, Math.min(MH, Math.round(uy(my))))];
       mark();
     }
     return;
   }
   if (app.drag && (app.mode === 'display' || app.mode === 'picture')) {
-    const dx = ev.clientX - app.drag.x, dy = ev.clientY - app.drag.y;
-    app.drag = { x: ev.clientX, y: ev.clientY };
-    app.cam.lon += dx * 0.008;
-    app.cam.lat = Math.max(-1.5, Math.min(1.5, app.cam.lat + dy * 0.008));
+    const { clientX: cx, clientY: cy } = ev;
+    app.cam.lon += (cx - app.drag.x) * 0.008;
+    app.cam.lat = Math.max(-1.5, Math.min(1.5, app.cam.lat + (cy - app.drag.y) * 0.008));
+    app.drag = { x: cx, y: cy };
     mark();
   }
 }
@@ -1434,33 +1401,33 @@ function wheel(ev) {
 /* ================================================================= setup */
 function toggleScreen() {
   app.screenMode = app.screenMode === 'authentic' ? 'highres' : 'authentic';
-  document.getElementById('bMode').textContent = 'screen: ' + app.screenMode;
+  $('bMode').textContent = 'screen: ' + app.screenMode;
   fit(); bipOK();
 }
 
 function boot() {
-  Raster.init(document.getElementById('fb'));
-  if (!GL.init(document.getElementById('gl'))) console.warn('WebGL 2 unavailable');
+  Raster.init($('fb'));
+  if (!GL.init($('gl'))) console.warn('WebGL 2 unavailable');
   fit();
   addEventListener('resize', fit);
   addEventListener('keydown', keyDown);
-  const scr = document.getElementById('scr');
+  const scr = $('scr');
   scr.addEventListener('mousedown', pointerDown);
   scr.addEventListener('touchstart', pointerDown, { passive: false });
   addEventListener('mousemove', pointerMove);
   addEventListener('mouseup', pointerUp);
   scr.addEventListener('wheel', wheel, { passive: false });
 
-  document.getElementById('bMode').onclick = toggleScreen;
-  document.getElementById('bFull').onclick = () => {
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+  $('bMode').onclick = toggleScreen;
+  $('bFull').onclick = () => {
+    document.fullscreenElement ? document.exitFullscreen() :
+      document.documentElement.requestFullscreen?.();
   };
-  document.getElementById('bExport').onclick = exportJSON;
-  document.getElementById('bStl').onclick = exportSTL;
-  document.getElementById('bHelp').onclick = () => { app.mode = 'help'; mark(); };
-  const fi = document.getElementById('file');
-  document.getElementById('bImport').onclick = () => fi.click();
+  $('bExport').onclick = exportJSON;
+  $('bStl').onclick = exportSTL;
+  $('bHelp').onclick = () => { app.mode = 'help'; mark(); };
+  const fi = $('file');
+  $('bImport').onclick = () => fi.click();
   fi.onchange = () => {
     const f = fi.files[0]; if (!f) return;
     const rd = new FileReader();
