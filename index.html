@@ -372,7 +372,7 @@ precision highp float;
 in vec3 vN;
 uniform vec3 uLight, uPaper, uInk;
 uniform int uMode;          // 0 = grayscale ramp, 1 = Bayer ordered dither, 2 = ZX Spectrum halftone
-uniform float uPix;         // device pixels per logical pixel
+uniform float uPix;         // pattern pixel scale (1 = device pixels)
 out vec4 outColor;
 const float bayer[64] = float[64](${BAYER.join('.0,')}.0);
 /* ZX Spectrum-style halftone: 9 levels (0=all paper … 8=all ink), 8 rows each.
@@ -673,7 +673,7 @@ function draw3D(kind) {
     gl.uniform3fv(gl.getUniformLocation(GL.pSolid, 'uPaper'), new Float32Array(colPaper));
     gl.uniform3fv(gl.getUniformLocation(GL.pSolid, 'uInk'), new Float32Array(colInk));
     gl.uniform1i(gl.getUniformLocation(GL.pSolid, 'uMode'), mode);
-    gl.uniform1f(gl.getUniformLocation(GL.pSolid, 'uPix'), S);
+    gl.uniform1f(gl.getUniformLocation(GL.pSolid, 'uPix'), 1);
     gl.bindVertexArray(GL.vaoSolid);
     gl.drawArrays(gl.TRIANGLES, 0, mesh.ntri * 3);
   };
