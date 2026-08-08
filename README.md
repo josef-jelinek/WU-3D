@@ -16,16 +16,19 @@ requests.
 - **MODIFY** — walk the existing Z planes and adjust them.
 - **DISPLAY / PICTURE** — orbit the "observing sphere" with the arrows, `N`ear / `F`ar,
   `M`agnify / `R`educe; render as wire line, `H`idden line, or `S`hade (light above /
-  centre / below × left / centre / right, then grey or pattern).
+  centre / below × left / centre / right, then `G`rey / `P`attern / `B`ayer).
 - **COLOUR**, **SAVE**, **LOAD**, **ABANDON** — as on the original main menu.
 
 `CAPS SHIFT` is mapped to `Shift` for fine movement, and `5 6 7 8` still work as cursor keys.
 
 ## Where it differs from 1982
 
-- 3D is rendered with **WebGL 2** instead of CPU dithering. Grayscale shading is a smooth
-  diffuse ramp; patterned shading thresholds the same lighting against an 8×8 Bayer matrix
-  in *logical* pixels, so it keeps the chunky look of the original at any zoom.
+- 3D is rendered with **WebGL 2** instead of CPU dithering. Three shading modes are
+  offered: `G`rey (smooth diffuse ramp), `P`attern (original ZX Spectrum-style — luminance
+  quantised to 9 discrete levels, each filled with a fixed 8×8 halftone tile: sparse dots,
+  alternating columns, checkerboard, etc.), and `B`ayer (65-level ordered dithering against
+  an 8×8 Bayer matrix in *logical* pixels). `P` is the faithful re-creation; `B` is the
+  modern smooth-looking alternative.
 - Press `T` to flip between the authentic 256×192 screen and high-resolution rendering.
 - Banner commands are clickable, and the mouse places points in OPEN and drags the view in
   DISPLAY.

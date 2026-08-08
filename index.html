@@ -370,10 +370,23 @@ const FS_SOLID = `#version 300 es
 precision highp float;
 in vec3 vN;
 uniform vec3 uLight, uPaper, uInk;
-uniform int uMode;          // 0 = grayscale ramp, 1 = ordered dither
+uniform int uMode;          // 0 = grayscale ramp, 1 = Bayer ordered dither, 2 = ZX Spectrum halftone
 uniform float uPix;         // device pixels per logical pixel
 out vec4 outColor;
 const float bayer[64] = float[64](${BAYER.join('.0,')}.0);
+/* ZX Spectrum-style halftone: 9 levels (0=all paper … 8=all ink), 8 rows each.
+   Each row is 8 bits; bit 7 = leftmost pixel (x%8==0).                       */
+const int PAT[72] = int[72](
+    0,  0,  0,  0,  0,  0,  0,  0,   // 0  all paper
+  128,  0,  0,  0,  8,  0,  0,  0,   // 1  ~14% sparse dots
+  136,  0, 34,  0,136,  0, 34,  0,   // 2  ~25% quarter-density diagonal
+  170,  0,170,  0,170,  0,170,  0,   // 3  ~37% alternating columns, half rows
+  170, 85,170, 85,170, 85,170, 85,   // 4  ~50% full checkerboard
+  255, 85,255, 85,255, 85,255, 85,   // 5  ~62% full rows + half rows
+  255,119,255,221,255,119,255,221,   // 6  ~75% dense with diagonal gaps
+  255,255,127,255,255,255,247,255,   // 7  ~87% near-solid, rare holes
+  255,255,255,255,255,255,255,255    // 8  all ink
+);
 void main(){
   vec3 N = normalize(vN);
   if(!gl_FrontFacing) N = -N;
@@ -381,11 +394,20 @@ void main(){
   float lum = clamp(0.18 + 0.82*d, 0.0, 1.0);
   if(uMode == 0){
     outColor = vec4(mix(uInk, uPaper, lum), 1.0);
-  } else {
+  } else if(uMode == 1){
     vec2 p = floor(gl_FragCoord.xy / uPix);
     int i = int(mod(p.x, 8.0)) + 8 * int(mod(p.y, 8.0));
     float t = (bayer[i] + 0.5) / 64.0;
     outColor = vec4(lum > t ? uPaper : uInk, 1.0);
+  } else {
+    /* quantise to one of 9 discrete levels then tile the matching pattern */
+    int level = clamp(int(lum * 8.0 + 0.5), 0, 8);
+    vec2 p = floor(gl_FragCoord.xy / uPix);
+    int px = int(mod(p.x, 8.0));
+    int py = int(mod(p.y, 8.0));
+    int row = PAT[level * 8 + py];
+    bool isInk = ((row >> (7 - px)) & 1) == 1;
+    outColor = vec4(isInk ? uInk : uPaper, 1.0);
   }
 }`;
 
@@ -674,8 +696,10 @@ function draw3D(kind) {
     drawLines(inkV());
   } else if (kind === 'gray') {
     drawSolid(0, paperV(), inkV());
+  } else if (kind === 'pattern') {
+    drawSolid(2, paperV(), inkV());
   } else {
-    drawSolid(1, paperV(), inkV());
+    drawSolid(1, paperV(), inkV());   /* 'dither' = Bayer */
   }
   gl.bindVertexArray(null);
   gl.disable(gl.SCISSOR_TEST);
@@ -860,7 +884,7 @@ function paint() {
       clearViewHole();
       const c = app.cam;
       const t = app.mode === 'display' ? 'wire line'
-        : ({ wire: 'wire line', hidden: 'hidden line', gray: 'shade: grey', dither: 'shade: pattern' })[app.pic.type];
+        : ({ wire: 'wire line', hidden: 'hidden line', gray: 'shade: grey', pattern: 'shade: pattern', dither: 'shade: Bayer' })[app.pic.type];
       drawStatus(t, 'lat' + pad3(c.lat * 180 / Math.PI) + ' lon' + pad3(((c.lon * 180 / Math.PI) % 360 + 360) % 360));
       break;
     }
@@ -1096,11 +1120,12 @@ function askShade2(v) {
 function askShade3(v, h) {
   app.pic.light = [h, v];
   app.prompt = {
-    title: 'SHADE', text: 'grey shading or pattern?',
-    text2: 'press  G  or  P',
+    title: 'SHADE', text: 'grey, pattern or Bayer dither?',
+    text2: 'press  G   P   B',
     keys: {
-      g: () => { app.pic.type = 'gray'; app.prompt = null; bipOK(); mark(); },
-      p: () => { app.pic.type = 'dither'; app.prompt = null; bipOK(); mark(); }
+      g: () => { app.pic.type = 'gray';    app.prompt = null; bipOK(); mark(); },
+      p: () => { app.pic.type = 'pattern'; app.prompt = null; bipOK(); mark(); },
+      b: () => { app.pic.type = 'dither';  app.prompt = null; bipOK(); mark(); }
     }
   };
   mark();
