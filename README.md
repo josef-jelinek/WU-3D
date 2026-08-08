@@ -31,39 +31,12 @@ requests.
   DISPLAY.
 - Cassette SAVE / LOAD become named browser-storage slots, plus `.json` export/import;
   `K`eep saves a PNG instead of a `SCREEN$`; `P`rint opens the browser print dialogue.
-- The built-in example (press `2` then `X`) is Psion's own EXAMPLE scene — a wine glass and
-  a cube — recovered from the memory image in `VU-3D/VU3DEXMP.TAP`. See below.
-
-## The EXAMPLE data file
-
-The two tapes carry byte-identical code blocks; the example differs only in its BASIC loader
-(`LET ab=1` — a data file is present — and `GO TO 370` to skip the opening question). The
-data file itself is still sitting in the saved memory image:
-
-- **vertex table at 32814** — 108 vertices, each `(x, y, z)` as three signed little-endian
-  words, grouped into rings of constant `z` (one ring per figure per Z plane);
-- **face list at 61280** — a count (91) followed by `[n][v0..vn-1]` records: one 12-sided
-  cap and 90 quads.
-
-Decoded, it is a 12-sided wine glass on eight Z planes (foot capped, rim left open) plus a
-cube on two planes — matching the manual's suggestion to "examine the glass ... using the
-MODIFY option". The original Z axis runs downward, so it is flipped to stand the glass on
-its foot and scaled by 0.864 to fit the workspace; the data is otherwise unaltered and is
-embedded in `index.html` as `EXAMPLE_FIGS`.
+- A built-in example scene — a twelve-sided wine glass and a cube — is available from the
+  LOAD screen (press `2` then `X`).
 
 Note: browsers block local storage for pages opened via `file://`, so SAVE/LOAD only work
 when the page is served over `http://`. Export/import work everywhere.
 
-## Reference material
-
-This project was built against the original tape images (`VU3DPUR.TAP`, `VU3DEXMP.TAP`), the
-tape inlay text, the Timex/Sinclair manual and a screenshot of the CREATE screen. Those sit
-in a local `VU-3D/` directory which is **git-ignored and not distributed** — they are still
-under copyright. Nothing in the app reads them at runtime; the `.tap` files were only
-inspected (and can be run in an emulator such as `fuse`).
-
 ## Licence
 
-The code in `index.html` is released into the public domain — see `LICENSE`. VU-3D itself is
-© Psion Ltd 1982 and its manual © Timex Computer Corporation 1983; the geometry of the
-built-in example derives from Psion's EXAMPLE tape.
+The code in `index.html` is released into the public domain — see `LICENSE`.
