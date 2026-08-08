@@ -29,6 +29,7 @@
     <button id="bMode">screen: authentic</button>
     <button id="bFull">fullscreen</button>
     <button id="bExport">export .json</button>
+    <button id="bStl">export .stl</button>
     <button id="bImport">import .json</button>
     <button id="bHelp">help</button>
   </div>
@@ -1057,6 +1058,34 @@ function exportJSON() {
   dl(blob, app.fileName.replace(/\W+/g, '_') + '.vu3d.json');
   say('exported');
 }
+function exportSTL() {
+  const mesh = buildMesh(app.model);
+  if (!mesh.ntri) { say('nothing to export'); bipNo(); return; }
+  /* Binary STL: 80-byte header + 4-byte triangle count + 50 bytes per triangle */
+  const buf = new ArrayBuffer(84 + mesh.ntri * 50);
+  const v = new DataView(buf);
+  const hdr = 'VU-3D export'; /* header: up to 80 ASCII bytes */
+  for (let i = 0; i < 80; i++) v.setUint8(i, i < hdr.length ? hdr.charCodeAt(i) : 0);
+  v.setUint32(80, mesh.ntri, true);
+  const pos = mesh.pos, nrm = mesh.nrm;
+  let off = 84;
+  for (let t = 0; t < mesh.ntri; t++) {
+    const b = t * 9;
+    /* normal — all three vertices share the same flat-face normal */
+    v.setFloat32(off, nrm[b],     true); off += 4;
+    v.setFloat32(off, nrm[b + 1], true); off += 4;
+    v.setFloat32(off, nrm[b + 2], true); off += 4;
+    /* three vertices */
+    for (let i = 0; i < 3; i++) {
+      v.setFloat32(off, pos[b + i * 3],     true); off += 4;
+      v.setFloat32(off, pos[b + i * 3 + 1], true); off += 4;
+      v.setFloat32(off, pos[b + i * 3 + 2], true); off += 4;
+    }
+    v.setUint16(off, 0, true); off += 2; /* attribute byte count */
+  }
+  dl(new Blob([buf], { type: 'model/stl' }), app.fileName.replace(/\W+/g, '_') + '.stl');
+  say('exported STL (' + mesh.ntri + ' triangles)');
+}
 function dl(blob, name) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
@@ -1428,6 +1457,7 @@ function boot() {
     else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
   };
   document.getElementById('bExport').onclick = exportJSON;
+  document.getElementById('bStl').onclick = exportSTL;
   document.getElementById('bHelp').onclick = () => { app.mode = 'help'; mark(); };
   const fi = document.getElementById('file');
   document.getElementById('bImport').onclick = () => fi.click();

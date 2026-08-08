@@ -32,8 +32,9 @@ requests.
 - Press `T` to flip between the authentic 256×192 screen and high-resolution rendering.
 - Banner commands are clickable, and the mouse places points in OPEN and drags the view in
   DISPLAY.
-- Cassette SAVE / LOAD become named browser-storage slots, plus `.json` export/import;
-  `K`eep saves a PNG instead of a `SCREEN$`; `P`rint opens the browser print dialogue.
+- Cassette SAVE / LOAD become named browser-storage slots, plus `.json` export/import and
+  binary `.stl` export (the lofted solid, ready for a slicer or CAD tool); `K`eep saves a
+  PNG instead of a `SCREEN$`; `P`rint opens the browser print dialogue.
 - A built-in example scene — a twelve-sided wine glass and a cube — is available from the
   LOAD screen (press `2` then `X`).
 
